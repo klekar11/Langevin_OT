@@ -1,0 +1,3 @@
+[submodule "sinkhorn/greenkhorn-Altschuler"]
+	path = sinkhorn/greenkhorn-Altschuler
+	url = https://github.com/JasonAltschuler/OptimalTransportNIPS17.git
