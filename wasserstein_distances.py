@@ -50,59 +50,67 @@ def W2_empirical(x, y):
     return np.sqrt(np.mean((xs - ys)**2))
 
 
-def sinkhorn_divergence_gaussian(m0, K0, m1, K1, epsilon):
+from scipy.linalg import sqrtm, det
+
+def entropic_wasserstein_gaussian(m0, K0, m1, K1, epsilon):
     """
-    Compute the entropic‐regularized 2‐Wasserstein cost OTₑ and the Sinkhorn divergence
-    S₂ₑ between two Gaussians N(m0,K0) and N(m1,K1). Supports both 1D (scalar K0,K1)
-    and multi‐dimensional (matrix K0,K1) cases.
+    Compute the entropic‐regularized 2‐Wasserstein cost
+    OT_{d^2}^ε( N(m0, K0), N(m1, K1) )
+    via Corollary 1 (a) in Mallasto et al. 2021.
+
+    Parameters
+    ----------
+    m0 : array-like, shape (n,)
+        Mean of the first Gaussian.
+    K0 : array-like, shape (n,n)
+        Covariance of the first Gaussian.
+    m1 : array-like, shape (n,)
+        Mean of the second Gaussian.
+    K1 : array-like, shape (n,n)
+        Covariance of the second Gaussian.
+    epsilon : float
+        Entropic regularization parameter ε > 0.
 
     Returns
     -------
-    sinkhorn_div : float
-    ot_cost     : float
+    OT_eps : float
+        The entropic‐regularized 2‐Wasserstein cost.
     """
-    # detect 1D‐Gaussian case
-    if np.isscalar(K0) and np.isscalar(K1):
-        # scalar variances
-        k0, k1 = float(K0)**2, float(K1)**2
-        m0, m1 = float(m0), float(m1)
-        n = 1
-        def term_scalar(k_i, k_j):
-            M = 1 + np.sqrt(1 + (epsilon**2 / 16) * (k_i * k_j))
-            return (M
-                    - np.log(M)
-                    + n * np.log(2)
-                    - 2 * n)
-        def ot_pair(k_i, k_j, m_i, m_j):
-            return ( (m_i - m_j)**2
-                    + k_i + k_j
-                   - epsilon * term_scalar(k_i, k_j) )
-        ot_01 = ot_pair(k0, k1, m0, m1)
-        ot_00 = ot_pair(k0, k0, m0, m0)
-        ot_11 = ot_pair(k1, k1, m1, m1)
-    else:
-        # vector/matrix case
-        m0 = np.atleast_1d(m0)
-        m1 = np.atleast_1d(m1)
-        K0 = np.atleast_2d(K0)
-        K1 = np.atleast_2d(K1)
-        n = m0.shape[0]
-        I = np.eye(n)
-        def Mij(Ki, Kj):
-            return I + sqrtm(I + (epsilon**2 / 16) * (Ki @ Kj))
-        def ot_pair(Ki, Kj, mi, mj):
-            M = Mij(Ki, Kj)
-            term = (np.trace(M)
-                    - np.log(np.linalg.det(M))
-                    + n * np.log(2)
-                    - 2 * n)
-            return (np.linalg.norm(mi - mj)**2
-                    + np.trace(Ki) + np.trace(Kj)
-                   - epsilon * term)
-        ot_01 = ot_pair(K0, K1, m0, m1)
-        ot_00 = ot_pair(K0, K0, m0, m0)
-        ot_11 = ot_pair(K1, K1, m1, m1)
+    # Ensure arrays
+    m0 = np.atleast_1d(m0)
+    m1 = np.atleast_1d(m1)
+    K0 = np.atleast_2d(K0)
+    K1 = np.atleast_2d(K1)
+    n = m0.shape[0]
 
-    sinkhorn_div = ot_01 - 0.5 * (ot_00 + ot_11)
-    return sinkhorn_div, ot_01
+    # 1) mean‐squared term
+    delta2 = np.dot(m0 - m1, m0 - m1)
+
+    # 2) trace terms
+    tr0 = np.trace(K0)
+    tr1 = np.trace(K1)
+
+    # 3) build M^ε = I + ( I + (16/ε²) K0 K1 )^{1/2}
+    A = np.eye(n) + (16.0 / epsilon**2) * (K0 @ K1)
+    sqrtA = sqrtm(A)
+    M_eps = np.eye(n) + sqrtA
+
+    # 4) compute trace and log‐determinant of M^ε
+    tr_M = np.trace(M_eps)
+    sign, logdet_M = np.linalg.slogdet(M_eps)
+    if sign <= 0:
+        raise ValueError("M^ε must be positive‐definite; numerical issue encountered.")
+
+    # 5) assemble formula
+    OT_eps = (
+        delta2
+        + tr0
+        + tr1
+        - (epsilon / 2.0) * (tr_M - logdet_M + n * np.log(2.0) - 2.0 * n)
+    )
+
+    return OT_eps
+
+
+
 
