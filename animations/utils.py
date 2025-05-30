@@ -2,6 +2,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import os
+from scipy.integrate import cumulative_trapezoid
+from scipy.interpolate import PchipInterpolator
+import scipy.linalg
+import scipy.stats as st
 
 def animate_coupling(
     X_traj: np.ndarray,
@@ -14,6 +18,10 @@ def animate_coupling(
     interval: int = 60,
     figsize=(11, 4),
     cmap='rainbow',
+    *,
+    save_last_frame: bool = True,
+    last_frame_path: str = 'coupling_last_frame.png',
+    last_frame_dpi: int = 300,
 ):
     """
     Animate the coupling trajectories and error convergence.
@@ -58,8 +66,8 @@ def animate_coupling(
                            va='top', ha='left', fontsize=9)
     ax_xy.set_xlabel(r'$X_t$')
     ax_xy.set_ylabel(r'$Y_t$')
-    ax_xy.set_xlim(x_curve[0], x_curve[-1])
-    ax_xy.set_ylim(y_curve.min(), y_curve.max())
+    ax_xy.set_xlim(-6, 6)
+    ax_xy.set_ylim(-8, 16)
     ax_xy.legend()
 
     # Right: error convergence
@@ -97,6 +105,24 @@ def animate_coupling(
     print(f'Animation saved as {filepath}')
     plt.tight_layout()
     plt.show()
+    
+    # --------  NEW: save last frame  ----------------------------------------
+    if save_last_frame:
+        final_idx = len(t) - 1
+        update(final_idx)                 # draw last frame
+        fig.canvas.draw_idle()            # ensure renderer is ready
+
+        # Tight bounding-box of ONLY the left axis:
+        bbox = ax_xy.get_tightbbox(fig.canvas.get_renderer())\
+                    .transformed(fig.dpi_scale_trans.inverted())
+
+        fig.savefig(last_frame_path, dpi=last_frame_dpi,
+                    bbox_inches=bbox, pad_inches=0.02)
+        print(f'Last frame written to {last_frame_path} (dpi={last_frame_dpi})')
+    # ------------------------------------------------------------------------
+
+    plt.tight_layout()
+    plt.show()
 
     return ani
 
@@ -113,7 +139,7 @@ def save_scatter_snapshot(
 ):
     """
     Save and display a snapshot of the coupling scatter against the OT curve at a given time,
-    with axes limited to x in [-3,3] and y in [-2,2].
+    with axes limited to x in [-3,3] and y centered at 2 with a ±2 window.
     """
     # find nearest frame
     idx = np.argmin(np.abs(t - time_point))
@@ -139,7 +165,8 @@ def save_scatter_snapshot(
     
     # force fixed axis limits
     ax.set_xlim(-3, 3)
-    ax.set_ylim(-2, 2)
+    # center y-axis at 2 with ±2 range → [0, 4]
+    ax.set_ylim(2 - 2, 2 + 2)
     
     ax.legend()
     plt.tight_layout()
@@ -148,3 +175,16 @@ def save_scatter_snapshot(
     plt.savefig(filename, dpi=300)
     plt.show()
     plt.close(fig)
+
+
+
+def build_double_well_quantile(beta=1.0, y_min=-6, y_max=6, ny=40_001):
+    """Return the inverse CDF F⁻¹ of ν(y) ∝ exp[−β V(y)]."""
+    y = np.linspace(y_min, y_max, ny)
+    V = 0.25 * y**4 - 0.5 * y**2
+    pdf = np.exp(-beta * V)
+    pdf /= np.trapz(pdf, y)                       # normalise
+
+    cdf = cumulative_trapezoid(pdf, y, initial=0.0)
+    mask = np.concatenate(([True], np.diff(cdf) > 0))  # drop flat tails
+    return PchipInterpolator(cdf[mask], y[mask])        # quantile fn

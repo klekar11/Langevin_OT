@@ -1,5 +1,6 @@
 import numpy as np
 from sklearn.linear_model import LinearRegression
+from sklearn.isotonic import IsotonicRegression 
 import itertools
 
 def compute_ols_parameters(X_samples, Y_samples):
@@ -156,4 +157,160 @@ def knn_conditional_expectation(X: np.ndarray,
     #    \hat m(X_i) = (1/k) * sum_{j in N_k(i)} Y_j
     m_hat = np.mean(Y[neighbor_idxs], axis=1)
 
+    return m_hat
+
+def isotonic_conditional_expectation(
+    X_samples: np.ndarray,
+    Y_samples: np.ndarray,
+    X_query: np.ndarray = None
+) -> np.ndarray:
+    """
+    Estimate E[Y | X = x] using 1D isotonic regression.
+    If X_query is None, returns estimates at the original sample points.
+
+    Parameters
+    ----------
+    X_samples : array-like, shape (n,)
+        Observed predictor samples.
+    Y_samples : array-like, shape (n,)
+        Observed response samples.
+    X_query : array-like, shape (m,), optional
+        Points at which to estimate the conditional expectation.
+        Defaults to X_samples.
+
+    Returns
+    -------
+    m_hat : np.ndarray, shape (m,)
+        Estimated E[Y | X = x] at each query point.
+    """
+    X_samples = np.asarray(X_samples)
+    Y_samples = np.asarray(Y_samples)
+    if X_query is None:
+        X_query = X_samples
+    else:
+        X_query = np.asarray(X_query)
+
+    # Fit isotonic regression and predict
+    iso = IsotonicRegression(increasing=True, out_of_bounds="clip")
+    iso.fit(X_samples, Y_samples)
+    m_hat = iso.predict(X_query)
+    return m_hat
+
+import numpy as np
+from sklearn.neighbors import NearestNeighbors
+
+# def knn_conditional_expectation_improved(X: np.ndarray,
+#                                 Y: np.ndarray,
+#                                 k: int=20,
+#                                 algorithm: str = 'kd_tree') -> np.ndarray:
+#     """
+#     Estimate E[Y | X] using distance-weighted k-NN with adaptive bandwidth
+#     h(x) = distance to the k-th neighbor, and Gaussian kernel weights.
+
+#     Parameters
+#     ----------
+#     X : array-like, shape (n,)
+#         Predictor samples.
+#     Y : array-like, shape (n,)
+#         Response samples.
+#     k : int
+#         Number of neighbors for kNN.
+#     algorithm : str
+#         Algorithm to use in sklearn.NearestNeighbors ('kd_tree' recommended).
+
+#     Returns
+#     -------
+#     m_hat : np.ndarray, shape (n,)
+#         Estimated conditional expectation values at each X_i.
+#     """
+    
+    
+#     X = np.asarray(X).reshape(-1, 1)   # (n,1)
+#     Y = np.asarray(Y)
+#     n = X.shape[0]
+
+#     # 1) Fit k-NN
+#     knn = NearestNeighbors(n_neighbors=k, algorithm=algorithm).fit(X)
+
+#     # 2) Query distances and indices
+#     distances, idxs = knn.kneighbors(X, return_distance=True)
+#     # distances[i,j] = |X_i - X_{idxs[i,j]}|
+
+#     # 3) Adaptive bandwidth for each query point
+#     #    h_i = distance to the k-th neighbor
+#     h = distances[:, -1]              # shape (n,)
+#     # Avoid zero bandwidth if duplicate points exist:
+#     h_safe = np.where(h > 0, h, 1e-8)
+
+#     # 4) Gaussian kernel weights w_ij = exp[−(d_ij / h_i)^2]
+#     #    weights shape (n,k)
+#     W = np.exp(- (distances / h_safe[:, None])**2)
+
+#     # 5) Weighted average of the k neighbors’ Y-values
+#     Y_nbhd = Y[idxs]                  # shape (n,k)
+#     numer    = np.sum(W * Y_nbhd, axis=1)
+#     denom    = np.sum(W, axis=1)
+#     m_hat    = numer / denom
+
+#     return m_hat
+
+def knn_conditional_expectation_improved(
+    X: np.ndarray,
+    Y: np.ndarray,
+    k: int,
+    algorithm: str = 'kd_tree',
+    x0: float = 3.0,
+    x1: float = 4.0
+) -> np.ndarray:
+    """
+    Local-linear, distance-weighted k-NN with tail blending.
+    
+    For |x| <= x0: pure local-linear k-NN.
+    For |x| >= x1: pure identity (m_tail(x)=x).
+    For x0 < |x| < x1: linear blend between the two.
+    """
+    X = X.ravel()
+    n = X.shape[0]
+    
+    # --- Step 1: find k-NN ---
+    Xi = X.reshape(-1,1)
+    nbrs = NearestNeighbors(n_neighbors=k, algorithm=algorithm).fit(Xi)
+    dists, idxs = nbrs.kneighbors(Xi, return_distance=True)
+    
+    # --- Step 2: local-linear fit at each point ---
+    m_knn = np.empty(n, dtype=float)
+    h = dists[:, -1]
+    h[h == 0] = 1e-8
+    
+    for i in range(n):
+        xi      = X[i]
+        Xi_nbhd = X[idxs[i]]         # shape (k,)
+        Yi_nbhd = Y[idxs[i]]         # shape (k,)
+        di      = dists[i]           # shape (k,)
+        
+        wi = np.exp(-(di / h[i])**2) # Gaussian weights
+        
+        # design matrix [1, Xj - xi]
+        A = np.vstack([np.ones(k), Xi_nbhd - xi]).T  # (k,2)
+        W = np.diag(wi)                              # (k,k)
+        
+        # solve weighted least squares
+        # beta = (A^T W A)^{-1} A^T W Y
+        AtW = A.T.dot(W)
+        beta = np.linalg.solve(AtW.dot(A), AtW.dot(Yi_nbhd))
+        
+        # intercept = fitted value at x = xi
+        m_knn[i] = beta[0]
+    
+    # --- Step 3: tail blending weights ---
+    absX = np.abs(X)
+    alpha = np.clip((absX - x0) / (x1 - x0), 0.0, 1.0)
+    # alpha = 0 for |X|<=x0, 1 for |X|>=x1, linear in between
+    
+    # --- Step 4: parametric tail map (identity here) ---
+    m_tail = X.copy()
+    
+    # --- Step 5: blend ---
+    m_hat = (1 - alpha) * m_knn + alpha * m_tail
+    
     return m_hat
