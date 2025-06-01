@@ -118,7 +118,46 @@ def cluster_conditional_expectation(X: np.ndarray,
     
     return m_hat
 
-from sklearn.neighbors import NearestNeighbors
+from sklearn.neighbors import NearestNeighbors, KNeighborsRegressor, RadiusNeighborsRegressor
+
+# def knn_conditional_expectation(X: np.ndarray,
+#                                     Y: np.ndarray,
+#                                     k: int,
+#                                     algorithm: str = 'kd_tree') -> np.ndarray:
+#     """
+#     Estimate E[Y | X] using k-nearest-neighbors with a KD-tree (piecewise-constant).
+
+#     Parameters
+#     ----------
+#     X : array-like, shape (n,)
+#         Predictor samples.
+#     Y : array-like, shape (n,)
+#         Response samples.
+#     k : int
+#         Number of neighbors for kNN.
+
+#     Returns
+#     -------
+#     m_hat : np.ndarray, shape (n,)
+#         Estimated conditional expectation values at each X_i.
+#     """
+#     # 1. Prepare data
+#     X = np.asarray(X).reshape(-1, 1)   # make into (n, 1)-shaped array
+#     Y = np.asarray(Y)
+
+#     # 2. Build KD-tree on the predictor values
+#     #    'algorithm="kd_tree"' ensures use of a KD-tree index under the hood
+#     knn = NearestNeighbors(n_neighbors=k, algorithm=algorithm).fit(X)
+
+#     # 3. For each X_i, find the indices of its k nearest neighbors
+#     #    kneighbors returns (distances, indices) arrays of shape (n, k)
+#     _, neighbor_idxs = knn.kneighbors(X, return_distance=True)
+
+#     # 4. Compute the local average of Y over those neighbors:
+#     #    \hat m(X_i) = (1/k) * sum_{j in N_k(i)} Y_j
+#     m_hat = np.mean(Y[neighbor_idxs], axis=1)
+
+#     return m_hat
 
 def knn_conditional_expectation(X: np.ndarray,
                                     Y: np.ndarray,
@@ -147,17 +186,11 @@ def knn_conditional_expectation(X: np.ndarray,
 
     # 2. Build KD-tree on the predictor values
     #    'algorithm="kd_tree"' ensures use of a KD-tree index under the hood
-    knn = NearestNeighbors(n_neighbors=k, algorithm=algorithm).fit(X)
+    knn = KNeighborsRegressor(n_neighbors=k, algorithm=algorithm)
 
-    # 3. For each X_i, find the indices of its k nearest neighbors
-    #    kneighbors returns (distances, indices) arrays of shape (n, k)
-    _, neighbor_idxs = knn.kneighbors(X, return_distance=True)
+    knn.fit(X,Y)
 
-    # 4. Compute the local average of Y over those neighbors:
-    #    \hat m(X_i) = (1/k) * sum_{j in N_k(i)} Y_j
-    m_hat = np.mean(Y[neighbor_idxs], axis=1)
-
-    return m_hat
+    return knn.predict(X)
 
 def isotonic_conditional_expectation(
     X_samples: np.ndarray,
