@@ -129,3 +129,4 @@ def euler_maruyama_coupling(
 
     return errors, X_traj, Y_traj, W2_sq, mY_hist, mX_hist
 
+
