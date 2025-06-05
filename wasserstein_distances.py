@@ -112,5 +112,54 @@ def entropic_wasserstein_gaussian(m0, K0, m1, K1, epsilon):
     return OT_eps
 
 
+def entropic_wasserstein_gaussian_1d(m0, K0, m1, K1, epsilon):
+    """
+    Compute the entropic‐regularized 2‐Wasserstein cost
+    OT_{d^2}^ε( N(m0, K0), N(m1, K1) ) in 1D.
 
+    Parameters
+    ----------
+    m0 : float
+        Mean of the first 1D Gaussian.
+    K0 : float
+        Variance of the first 1D Gaussian.
+    m1 : float
+        Mean of the second 1D Gaussian.
+    K1 : float
+        Variance of the second 1D Gaussian.
+    epsilon : float
+        Entropic regularization parameter ε > 0.
+
+    Returns
+    -------
+    OT_eps : float
+        The entropic‐regularized 2‐Wasserstein cost in 1D.
+    """
+
+    # 1) Mean-squared term
+    delta2 = (m0 - m1) ** 2
+
+    # 2) Trace terms are just the variances in 1D
+    tr0 = K0
+    tr1 = K1
+
+    # 3) Build M^ε = 1 + sqrt(1 + (16 / ε²) * K0 * K1)
+    A = 1 + (16.0 / epsilon**2) * K0 * K1
+    sqrtA = np.sqrt(A)
+    M_eps = 1 + sqrtA
+
+    # 4) Compute trace and log-determinant of M^ε (trivial in 1D)
+    tr_M = M_eps
+    logdet_M = np.log(M_eps)
+
+    # 5) Assemble formula (n = 1 in 1D)
+    n = 1
+    OT_eps = (
+        delta2
+        + tr0
+        + tr1
+        - (epsilon / 2.0) * (tr_M - logdet_M + n * np.log(2.0) - 2.0 * n)
+    )
+
+    return OT_eps
 
